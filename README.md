@@ -69,6 +69,8 @@ py -3.12 -m venv .venv
 ```
 
 `build.bat` builds a single `dist\Lectura.exe`.
+`Lectura-debug.bat` starts it with the decision log on: each recording writes a `debug.log`
+next to its captures in `%LOCALAPPDATA%\Lectura\sessions`.
 
 Tests:
 
