@@ -43,6 +43,16 @@ QComboBox, QLineEdit {{
     padding: 6px 8px;
 }}
 QComboBox:focus, QLineEdit:focus {{ border-color: {ACCENT}; }}
+QComboBox {{ padding-right: 30px; }}
+QComboBox::drop-down {{
+    subcontrol-origin: padding; subcontrol-position: center right;
+    width: 28px; border: none; background: transparent;
+}}
+QComboBox::down-arrow {{ image: url("__CHEVRON__"); width: 12px; height: 8px; }}
+QComboBox QAbstractItemView {{
+    background: #ffffff; border: 1px solid #d5d8e3; selection-background-color: #e6e5fb;
+    selection-color: #1f2330; padding: 4px; outline: 0;
+}}
 QCheckBox {{ spacing: 8px; }}
 QSlider::groove:horizontal {{ height: 6px; background: #e3e5ee; border-radius: 3px; }}
 QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 3px; }}

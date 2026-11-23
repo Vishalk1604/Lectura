@@ -51,13 +51,13 @@ def test_small_presentation_tile_beats_whole_page():
     frame[76:79] = (229, 70, 79)  # coloured line under the toolbar
     frame[96:937, 21:566] = 0     # black tile
     s = synth.slide(1, 3, w=545, h=306)
-    frame[374:680, 21:566] = s
+    frame[363:669, 21:566] = s    # centred in the tile, like real letterboxing
     rng = np.random.default_rng(1)
     for top in (96, 292, 488):
         tile = rng.integers(40, 200, (180, 320, 3), dtype=np.uint8)
         frame[top:top + 180, 590:910] = tile
     got = detect_content_rect(frame)
-    assert close(got, (21, 374, 545, 306), tol=8), got
+    assert close(got, (21, 363, 545, 306), tol=8), got
 
 
 def test_no_rectangle_returns_full_frame():
@@ -94,6 +94,33 @@ def test_blank_detection():
     assert is_blank(synth.noisy(np.full((720, 1280, 3), 30, np.uint8), 1.0, amp=4))
     assert not is_blank(synth.slide(1, 1))
     assert not is_blank(synth.board(synth.strokes(3)))
+
+
+def _thin_board(n=12, dim=1.0, w=1920, h=1080):
+    """Full-HD whiteboard with thin (2 px) pen strokes, optionally dimmed."""
+    import cv2
+    img = np.full((h, w, 3), 250, np.uint8)
+    for s in synth.strokes(n, seed=7, w=w, h=h, top=400):
+        cv2.polylines(img, [s], False, (40, 20, 20), 2, cv2.LINE_AA)
+    return (img.astype(np.float32) * dim).astype(np.uint8)
+
+
+def test_thin_pen_strokes_are_not_blank():
+    assert not is_blank(_thin_board())
+
+
+def test_thin_dimmed_pen_strokes_are_not_blank():
+    assert not is_blank(_thin_board(dim=0.55))
+
+
+def test_thin_whiteboard_pages_are_not_duplicates_of_each_other():
+    d = Deduper()
+    d.add(_thin_board(12))
+    import cv2
+    other = np.full((1080, 1920, 3), 250, np.uint8)
+    for s in synth.strokes(12, seed=99, w=1920, h=1080, top=100):
+        cv2.polylines(other, [s], False, (40, 20, 20), 2, cv2.LINE_AA)
+    assert not d.is_redundant(other)
 
 
 def test_deduper_identical_and_different():

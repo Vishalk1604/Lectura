@@ -157,11 +157,33 @@ def test_fade_transition_frames_are_never_saved():
     assert similar(caps[0].image, a) and similar(caps[1].image, b)
 
 
-def test_background_colour_change_is_a_new_slide():
+def test_next_slide_with_dark_background_is_a_new_slide():
     pipe, c = CapturePipeline(), Clock()
     caps = run(pipe, synth.slide(1, 3), c, 4)
-    caps += run(pipe, synth.slide(1, 3, bg=(40, 30, 30), fg=(240, 240, 240)), c, 4)
+    caps += run(pipe, synth.slide(2, 3, bg=(40, 30, 30), fg=(240, 240, 240)), c, 4)
     assert len(caps) == 1
+
+
+def test_dimming_overlay_is_not_a_new_slide():
+    """A browser popup dims the page, then goes away: still the same slide."""
+    pipe, c = CapturePipeline(), Clock()
+    s = synth.slide(1, 3)
+    dim = (s.astype(np.float32) * 0.55).astype(np.uint8)
+    caps = run(pipe, dim, c, 4)
+    caps += run(pipe, s, c, 4)
+    caps += run(pipe, synth.slide(2, 3), c, 4)
+    caps.append(pipe.finish())
+    assert len(caps) == 2  # slide 1 (once) and slide 2
+
+
+def test_revisit_of_dimmed_capture_is_deduplicated():
+    pipe, c = CapturePipeline(), Clock()
+    s1 = synth.slide(1, 3)
+    caps = run(pipe, (s1.astype(np.float32) * 0.55).astype(np.uint8), c, 4)
+    caps += run(pipe, synth.slide(2, 3), c, 4)
+    caps += run(pipe, s1, c, 4)              # back to slide 1, now bright
+    caps += run(pipe, synth.slide(3, 3), c, 4)
+    assert len(caps) == 2
 
 
 def test_letterboxed_frames_are_trimmed():
@@ -189,6 +211,26 @@ def test_extreme_sensitivities_still_separate_distinct_slides(s):
     for sid in (1, 2, 3):
         caps += run(pipe, synth.slide(sid, 3), c, 4)
     assert len(caps) == 2
+
+
+def test_loose_crop_with_letterbox_and_page_background_still_detects_slides():
+    """Crop = whole Meet window (dark background, black bars, participant tiles)."""
+    pipe, c = CapturePipeline(), Clock()
+    caps = []
+    for sid in (1, 2, 3):
+        frame, _ = synth.meet_layout(synth.slide(sid, 3))
+        caps += run(pipe, frame, c, 4)
+    caps.append(pipe.finish())
+    assert len(caps) == 3
+
+
+def test_loose_crop_bullet_build_still_one_capture():
+    pipe, c = CapturePipeline(), Clock()
+    caps = []
+    for n in (1, 2, 3):
+        caps += run(pipe, synth.meet_layout(synth.slide(1, n))[0], c, 4)
+    caps += run(pipe, synth.meet_layout(synth.slide(2, 3))[0], c, 4)
+    assert len(caps) == 1
 
 
 def test_resize_of_crop_commits_previous_page():

@@ -7,3 +7,4 @@ dist/
 *.spec.bak
 /scratch/
 /test_output/
+build.log

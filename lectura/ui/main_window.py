@@ -124,6 +124,7 @@ class MainWindow(QMainWindow):
         cl.addWidget(QLabel("Class window"))
         self.combo = WindowCombo(lambda: self.refresh_windows())
         self.combo.setMinimumWidth(420)
+        self.combo.setPlaceholderText("Choose the window your class is in…")
         self.combo.currentIndexChanged.connect(self._on_window_changed)
         cl.addWidget(self.combo, 1)
         lay.addWidget(c)
@@ -400,12 +401,14 @@ class MainWindow(QMainWindow):
         m, s = divmod(rem, 60)
         n = core.count
         state = self._last_status or "recording"
-        label = {"recording": "● Recording", "paused": "❚❚ Paused",
+        label = {"recording": "● Recording", "covered": "● Recording (window hidden)",
+                 "paused": "❚❚ Paused",
                  "minimized": "❚❚ Waiting – class window minimized",
                  "waiting": "● Waiting for the window to draw",
                  "closed": "Class window closed", "error": "Error"}.get(state, "● Recording")
         self.status.setText(f"{label}  ·  {n} captured  ·  {h:02d}:{m:02d}:{s:02d}")
-        color = {"recording": "#e5484d", "paused": "#b7791f", "minimized": "#b7791f"}.get(
+        color = {"recording": "#e5484d", "covered": "#b7791f", "paused": "#b7791f",
+                 "minimized": "#b7791f"}.get(
             state, "#1f2330")
         self.status.setStyleSheet(f"color:{color};")
         self.tray.setToolTip(f"{APP_NAME}: {n} captured")
@@ -418,6 +421,11 @@ class MainWindow(QMainWindow):
         elif state == "recording":
             self.substatus.setText("Slides are saved automatically when they change. You can "
                                    "switch to other apps.")
+        elif state == "covered":
+            self.substatus.setText("The class window is completely hidden and hasn't changed "
+                                   "for a while. Some browsers stop updating hidden windows: "
+                                   "leave a small part of it visible, or put it on another "
+                                   "monitor (README explains a browser setting that fixes it).")
         elif state == "paused":
             self.substatus.setText("Paused. Press Resume to continue.")
         elif state == "closed":

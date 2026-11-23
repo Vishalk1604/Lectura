@@ -16,7 +16,7 @@ import cv2
 import numpy as np
 
 from .autocrop import trim_uniform_border
-from .dedupe import Deduper, is_blank
+from .dedupe import Deduper, changed_pixels, ink_mask, is_blank
 
 DIFF_T = 25        # gray-level change that counts as a changed pixel
 CONTENT_T = 30     # distance from background colour that counts as content (ink/text)
@@ -56,6 +56,12 @@ class SlideChangeDetector:
         self._page_g: np.ndarray | None = None      # analysis-res P
         self._page_t = 0.0
         self.page_version = 0                       # bumps whenever P changes
+        self.log = None                             # optional callable(str) for debugging
+        self._t = 0.0
+
+    def _debug(self, msg: str) -> None:
+        if self.log is not None:
+            self.log(f"t={self._t:7.1f} {msg}")
 
     # ------------------------------------------------------------------ config
     def set_sensitivity(self, s: float) -> None:
@@ -63,7 +69,7 @@ class SlideChangeDetector:
         s = min(1.0, max(0.0, s))
         self.sensitivity = s
         self.lost_threshold = _lerp(0.45, 0.12, s)       # share of old content gone
-        self.lost_abs_threshold = _lerp(0.008, 0.002, s)  # ...and of the whole frame
+        self.lost_abs_threshold = _lerp(0.004, 0.001, s)  # ...and of the whole frame
         self.global_threshold = _lerp(0.6, 0.35, s)      # share of all pixels changed
         self.scroll_threshold = _lerp(0.2, 0.06, s)      # share of content scrolled away
         self.settle_threshold = 0.003
@@ -141,42 +147,54 @@ class SlideChangeDetector:
         self.page_version += 1
 
     def _on_settled(self, frame, g, use, t) -> list[Capture]:
+        self._t = t
         if self._page_g is None:
             self._set_page(frame, g, t, True)
+            self._debug("first page")
             return []
         P = self._page_g
         if P.shape != g.shape:
             # crop/size changed: different page geometry, save the old page
             out = [Capture(self._page, self._page_t)]
             self._set_page(frame, g, t, True)
+            self._debug("COMMIT (crop size changed)")
             return out
 
         if self._page_is_new(P, g, use):
             out = [Capture(self._page, self._page_t)]
             self._set_page(frame, g, t, True)
+            self._debug(f"COMMIT page from t={out[0].t:.1f}")
             return out
         if not np.array_equal(P, g):
             self._set_page(frame, g, t, False)
         return []
 
     def _page_is_new(self, P: np.ndarray, S: np.ndarray, use: np.ndarray) -> bool:
+        """True when much of P's content (text, ink, lines) changed in S.
+
+        Content is fine detail only (flat page background and black bars don't count).
+        Brightness is matched first, so a dimming overlay or a brightness change never
+        looks like a new page; additions (new bullets, new writing) don't touch P's content.
+        """
         n_use = max(1, int(use.sum()))
-        bg_p = int(np.bincount(P[use], minlength=256).argmax())
-        bg_s = int(np.bincount(S[use], minlength=256).argmax())
-        content = (np.abs(P.astype(np.int16) - bg_p) > CONTENT_T) & use
+        content = ink_mask(P, use)
         n_content = int(content.sum())
         if n_content < 0.002 * n_use:
+            if self.log:
+                self._debug(f"same page: old page blank (content {n_content / n_use:.4f})")
             return False  # old page is (nearly) blank: nothing worth saving
-        diff = (cv2.absdiff(P, S) > DIFF_T) & use
+        diff = changed_pixels(P, S, use, DIFF_T)
         changed_all = int(diff.sum()) / n_use
         lost_px = int((diff & content).sum())
         lost = lost_px / n_content
         lost_abs = lost_px / n_use
-
         big = (changed_all >= self.global_threshold
-               or abs(bg_p - bg_s) > CONTENT_T and changed_all > 0.2
                or (lost >= self.lost_threshold and lost_abs >= self.lost_abs_threshold))
+        stats = (f"content={n_content / n_use:.4f} changed={changed_all:.3f} lost={lost:.3f} "
+                 f"lost_abs={lost_abs:.4f}")
         if not big:
+            if self.log and changed_all > 0.001:
+                self._debug(f"same page: {stats}")
             return False
 
         scroll = self._detect_vertical_scroll(P, S, content, use)
@@ -189,15 +207,17 @@ class SlideChangeDetector:
             else:
                 gone = content[h - dy:]
             gone_frac = int(gone.sum()) / n_content
+            self._debug(f"scroll dy={dy} gone={gone_frac:.3f} -> "
+                        f"{'new' if gone_frac >= self.scroll_threshold else 'same'} page: {stats}")
             return gone_frac >= self.scroll_threshold
+        self._debug(f"new page: {stats}")
         return True
 
     def _detect_vertical_scroll(self, P, S, content, use) -> int | None:
         """Return dy if S is P scrolled vertically (S[y] ~ P[y - dy]), else None."""
         h, w = P.shape
-        bg = int(np.bincount(P[use], minlength=256).argmax())
-        prof_p = (np.abs(P.astype(np.int16) - bg) * use).mean(axis=1)
-        prof_s = (np.abs(S.astype(np.int16) - bg) * use).mean(axis=1)
+        prof_p = (content & use).mean(axis=1).astype(np.float64)
+        prof_s = (ink_mask(S) & use).mean(axis=1).astype(np.float64)
         prof_p = prof_p - prof_p.mean()
         prof_s = prof_s - prof_s.mean()
         min_overlap = int(0.1 * h)
@@ -265,8 +285,10 @@ class SlideChangeDetector:
 class CapturePipeline:
     """Detector + letterbox trim + blank filter + duplicate filter."""
 
-    def __init__(self, sensitivity: float = 0.5, trim: bool = True, **kw):
+    def __init__(self, sensitivity: float = 0.5, trim: bool = True, log=None, **kw):
         self.detector = SlideChangeDetector(sensitivity=sensitivity, **kw)
+        self.detector.log = log
+        self.log = log
         self.deduper = Deduper()
         self.trim = trim
 
@@ -275,10 +297,16 @@ class CapturePipeline:
             return None
         img = trim_uniform_border(cap.image) if self.trim else cap.image
         if is_blank(img):
+            if self.log:
+                self.log(f"  dropped page from t={cap.t:.1f}: blank")
             return None
         if not cap.forced and self.deduper.is_redundant(img):
+            if self.log:
+                self.log(f"  dropped page from t={cap.t:.1f}: already captured")
             return None
         self.deduper.add(img)
+        if self.log:
+            self.log(f"  saved page from t={cap.t:.1f}{' (manual)' if cap.forced else ''}")
         return Capture(np.ascontiguousarray(img), cap.t, cap.forced)
 
     def feed(self, frame: np.ndarray, t: float) -> list[Capture]:

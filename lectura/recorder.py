@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from typing import Callable
@@ -15,6 +16,7 @@ from .detector import Capture, CapturePipeline
 from .session import Item, Session
 
 FULL = (0.0, 0.0, 1.0, 1.0)
+STALE_SECONDS = 10.0  # no new frame for this long while fully covered -> warn
 
 
 class RecorderCore:
@@ -30,7 +32,13 @@ class RecorderCore:
         self.session = session
         self.crop_frac = tuple(crop_frac)
         self.interval = 1.0 / fps
-        self.pipeline = CapturePipeline(sensitivity=sensitivity)
+        self._debug_file = None
+        log = None
+        if os.environ.get("LECTURA_DEBUG"):  # page decisions -> <session>/debug.log
+            self._debug_file = open(session.folder / "debug.log", "a", encoding="utf-8")
+            log = lambda msg: (self._debug_file.write(msg + "\n"), self._debug_file.flush())  # noqa: E731
+        self.pipeline = CapturePipeline(sensitivity=sensitivity, log=log)
+        self.frame_dump = os.environ.get("LECTURA_DUMP_FRAMES")  # folder for raw cropped frames
         self.on_capture = on_capture or (lambda item, img: None)
         self.on_status = on_status or (lambda s: None)
         self.on_frame = on_frame or (lambda f: None)
@@ -93,6 +101,7 @@ class RecorderCore:
     def run(self) -> None:
         last_pending_version, last_pending_write = -1, 0.0
         last_frame_emit = 0.0
+        last_cover_check, hidden = 0.0, False
         try:
             next_tick = time.monotonic()
             while not self._stop.is_set():
@@ -129,8 +138,17 @@ class RecorderCore:
                     if frame is None:
                         self._status("waiting")
                         continue
-                    self._status("recording")
+                    if now - last_cover_check > 2.0:
+                        last_cover_check = now
+                        age = getattr(self.source, "frame_age", 0.0)
+                        hidden = (age > STALE_SECONDS
+                                  and winlist.covered_fraction(self.hwnd) > 0.99)
+                    self._status("covered" if hidden else "recording")
                     crop = self._crop(frame)
+                    if self.frame_dump:  # for offline replay (tools/replay.py)
+                        from .session import write_png
+                        from pathlib import Path
+                        write_png(Path(self.frame_dump) / f"{t:09.2f}.png", crop)
                     for cap in self.pipeline.feed(crop, t):
                         self._save(cap)
 
@@ -148,6 +166,8 @@ class RecorderCore:
             except Exception as e:
                 self.error = self.error or f"{type(e).__name__}: {e}"
             self.session.mark_finished()
+            if self._debug_file is not None:
+                self._debug_file.close()
             try:
                 self.source.stop()
             except Exception:

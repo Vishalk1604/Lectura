@@ -25,6 +25,16 @@ def _uniform_run(lines: np.ndarray, tol: float) -> int:
     return n
 
 
+def _bar_width(lines: np.ndarray, tol: float, max_skip: int = 2) -> int:
+    """Width of a uniform bar at the start of `lines`, ignoring up to `max_skip`
+    blended boundary lines (anti-aliasing from scaling)."""
+    for skip in range(max_skip + 1):
+        n = _uniform_run(lines[skip:], tol)
+        if n >= 3:
+            return skip + n
+    return 0
+
+
 def _near_standard(ratio: float, tol: float = 0.03) -> bool:
     return any(abs(ratio - r) / r <= tol for r in STANDARD_RATIOS)
 
@@ -41,10 +51,10 @@ def find_letterbox(img: np.ndarray, tol: float = 3.0) -> Rect | None:
     h, w = g.shape
     if h < 40 or w < 40:
         return None
-    top = _uniform_run(g, tol)
-    bottom = _uniform_run(g[::-1], tol)
-    left = _uniform_run(g.T, tol)
-    right = _uniform_run(g.T[::-1], tol)
+    top = _bar_width(g, tol)
+    bottom = _bar_width(g[::-1], tol)
+    left = _bar_width(g.T, tol)
+    right = _bar_width(g.T[::-1], tol)
     if top >= h // 2 or left >= w // 2:
         return None  # whole image uniform
 
@@ -136,16 +146,27 @@ def detect_content_rect(frame: np.ndarray) -> Rect:
     gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY) if small.ndim == 3 else small
     h, w = gray.shape
 
+    def expanded():
+        """Each candidate, plus the picture inside it if it has letterbox bars
+        (a tall black Meet tile holding a 16:9 slide is itself not slide-shaped)."""
+        for r in _candidates(gray):
+            yield r, False
+            x, y, rw, rh = r
+            inner = find_letterbox(gray[y:y + rh, x:x + rw])
+            if inner is not None:
+                ix, iy, iw, ih = inner
+                yield (x + ix, y + iy, iw, ih), True
+
     best, best_score = None, 0.0
     seen = set()
-    for r in _candidates(gray):
+    for r, from_letterbox in expanded():
         x, y, rw, rh = r
         key = (x // 4, y // 4, rw // 4, rh // 4)
         if key in seen:
             continue
         seen.add(key)
         area = rw * rh / (w * h)
-        if area < 0.15 or area > 0.98:
+        if area < (0.06 if from_letterbox else 0.15) or area > 0.98:
             continue
         ratio = rw / rh
         if not 0.9 <= ratio <= 2.6:
@@ -157,7 +178,7 @@ def detect_content_rect(frame: np.ndarray) -> Rect:
         # the slide itself; prefer a tile inside it.
         touches = sum((x <= 3, y <= 3, x + rw >= w - 3, y + rh >= h - 3))
         if touches >= 3:
-            score *= 0.3
+            score *= 0.12
         if score > best_score:
             best, best_score = r, score
 

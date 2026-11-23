@@ -151,6 +151,45 @@ def list_windows(exclude_pid: int | None = None) -> list[WindowInfo]:
     return found
 
 
+GW_HWNDPREV = 3
+WS_EX_TRANSPARENT = 0x00000020
+WS_EX_LAYERED = 0x00080000
+
+
+def covered_fraction(hwnd: int, grid: tuple[int, int] = (64, 36)) -> float:
+    """Share of the window hidden behind windows above it in the z-order (0..1).
+
+    Browsers may stop drawing a window that is completely covered, so the recorder
+    uses this to warn the user.
+    """
+    import numpy as np
+
+    l, t, r, b = window_rect(hwnd)
+    if r <= l or b <= t:
+        return 0.0
+    gw, gh = grid
+    xs = l + (np.arange(gw) + 0.5) * (r - l) / gw
+    ys = t + (np.arange(gh) + 0.5) * (b - t) / gh
+    covered = np.zeros((gh, gw), bool)
+    other = user32.GetWindow(hwnd, GW_HWNDPREV)
+    steps = 0
+    while other and steps < 500:
+        steps += 1
+        if (user32.IsWindowVisible(other) and not user32.IsIconic(other)
+                and not _is_cloaked(other)):
+            ex = user32.GetWindowLongPtrW(other, GWL_EXSTYLE)
+            if not (ex & WS_EX_TRANSPARENT and ex & WS_EX_LAYERED):
+                ol, ot, orr, ob = window_rect(other)
+                if orr - ol > 1 and ob - ot > 1:
+                    cx = (xs >= ol) & (xs < orr)
+                    cy = (ys >= ot) & (ys < ob)
+                    covered |= cy[:, None] & cx[None, :]
+                    if covered.all():
+                        return 1.0
+        other = user32.GetWindow(other, GW_HWNDPREV)
+    return float(covered.mean())
+
+
 _KNOWN_SITES = ("meet", "classroom", "kiteroom", "zoom", "teams", "webex", "youtube")
 
 

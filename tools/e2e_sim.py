@@ -19,6 +19,9 @@ from pathlib import Path
 OUT = Path(sys.argv[1] if len(sys.argv) > 1 else "test_output").resolve()
 OUT.mkdir(parents=True, exist_ok=True)
 os.environ["LOCALAPPDATA"] = str(OUT / "appdata")  # keep test sessions out of the real app
+os.environ["LECTURA_DEBUG"] = "1"                   # page decisions -> session debug.log
+(OUT / "frames").mkdir(parents=True, exist_ok=True)
+os.environ["LECTURA_DUMP_FRAMES"] = str(OUT / "frames")  # replay with tools/replay.py
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
@@ -50,20 +53,27 @@ def find_window(timeout=30):
 def main():
     winlist.set_dpi_aware()
     url = (ROOT / "tools" / "class_sim.html").as_uri()
-    subprocess.Popen(["cmd", "/c", "start", "", "msedge", "--new-window", url])
+    profile = OUT / "edge-profile"  # throwaway Edge instance: never touches the user's windows
+    # The same switches the README recommends, so the run also checks that they keep a
+    # fully covered browser window drawing.
+    subprocess.Popen(["cmd", "/c", "start", "", "msedge", f"--user-data-dir={profile}",
+                      "--no-first-run", "--no-default-browser-check",
+                      "--disable-features=CalculateNativeWinOcclusion",
+                      "--disable-backgrounding-occluded-windows", "--new-window", url])
     w = find_window()
     if w is None:
         print("simulator window not found")
         return 1
     hwnd = w.hwnd
     print("window:", w.label)
-    # 1600x950, then send it behind every other window
+    # 1600x950. Keep it visible: browsers stop drawing windows that are fully covered
+    # (the app warns about that case); capture of a partly covered window was checked separately.
     ctypes.windll.user32.ShowWindow(hwnd, 9)
-    ctypes.windll.user32.SetWindowPos(hwnd, 1, 40, 40, 1600, 950, 0x0010)
-    time.sleep(1.5)
+    ctypes.windll.user32.SetWindowPos(hwnd, 0, 40, 40, 1600, 950, 0x0004 | 0x0010)
 
     src = open_source(hwnd)
     print("capture backend:", src.name)
+    time.sleep(3)  # let the page re-lay itself out after the resize
     frame = None
     for _ in range(40):
         frame = src.latest()
@@ -92,9 +102,16 @@ def main():
     th = threading.Thread(target=core.run, daemon=True)
     th.start()
     t0 = time.time()
+    last_log = 0.0
     while time.time() - t0 < 200:
-        if "- done" in winlist.get_title(hwnd):
+        title = winlist.get_title(hwnd)
+        if "- done" in title:
             break
+        if time.time() - last_log > 10:
+            last_log = time.time()
+            print(f"  t={time.time() - t0:5.0f}s covered={winlist.covered_fraction(hwnd):.0%} "
+                  f"frame_age={getattr(src, 'frame_age', 0):.1f}s "
+                  f"phase={title.replace(TITLE, '').split(' - ')[1:2]}")
         time.sleep(0.5)
     print(f"timeline finished after {time.time() - t0:.0f}s, moving area "
           f"{core.pipeline.detector.moving_fraction:.1%}")

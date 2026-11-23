@@ -132,16 +132,31 @@ The app is named **Lectura** (package `lectura/`, repo github.com/Vishalk1604/Le
    - Auto-crop ran before the page had finished re-laying out after the resize.
    - **Fix in `e2e_sim.py`:** launch an isolated Edge (`--user-data-dir=<scratch> --no-first-run --no-default-browser-check --new-window`), wait about 3 s after resizing before auto-crop, and never run it while you are in a class.
 
-### Next session: steps in order
-1. Fix the auto-crop candidate handling (problem 1) and get all unit tests green.
-2. Re-run the E2E simulator (tell you before the Edge window opens). Expect 7 captures: slide 1 (all bullets), slide 2, slide 3, whiteboard page 1, whiteboard page 2 before the scroll, after the scroll, and slide 4. The revisit of slide 1 should be dropped.
-3. **Check browser occlusion throttling:** Chrome, Edge and Firefox may stop painting a window that is fully covered.
-   - With the simulator window fully covered, confirm that frames keep updating (`WgcSource.frame_age`).
-   - If they don't, the app warns when frames go stale while the window isn't minimized.
-   - The README then explains the fixes: Chrome/Edge `--disable-features=CalculateNativeWinOcclusion` and `--disable-backgrounding-occluded-windows`; Firefox `widget.windows.window_occlusion_tracking.enabled = false` in about:config.
-4. **Launch the UI** (`.venv\Scripts\python.exe -m lectura`) and walk through: pick window → auto-detect and drag crop → Start → Pause/Resume → Capture now (Ctrl+Alt+S) → Stop → review (delete, reorder, enlarge) → save all three formats. Also check crash recovery: kill the app mid-recording and relaunch.
-5. **Render the exported PDF/DOCX/PPTX** and check the 2-per-page layout and captions visually.
-6. **Package:** `Lectura.spec` and `build.bat` (PyInstaller one-file, windowed, `assets/lectura.ico` bundled), then run `dist\Lectura.exe`.
-7. **Write `README.md`:** usage, the hotkey, and the limits (don't minimize the class window, keep the class in its own browser window, DRM video may be black, occlusion settings).
-8. **Commit and push** to github.com/Vishalk1604/Lectura.
-9. **Test on a real class,** but only when you say so. Don't capture a live class or open test windows during a class without asking first.
+## Progress (session 2, 2026-11-23)
+
+### Done
+- **Auto-crop fixed.** Every candidate is letterbox-trimmed before the shape check, blended 1–2 px edges are ignored, and the "whole web page" area gets a ×0.12 penalty. In the real simulator window it now finds the exact 16:9 slide (1199×672).
+- **Detector rebuilt around fine detail.**
+  - "Content" now means text and ink strokes (morphological top-hats), so black bars and page background don't count. A loose crop still works.
+  - Brightness is matched before comparing (a line fit, used only when it explains the frames better). A dimming popup or a brightness change is therefore neither a new page nor a missed duplicate.
+  - Dedupe uses the same comparison.
+- **Fully covered browsers confirmed.**
+  - Edge stops drawing a fully covered window: both painting and JS timers freeze.
+  - With `--disable-features=CalculateNativeWinOcclusion --disable-backgrounding-occluded-windows` it kept drawing for 30 of 30 covered seconds.
+  - The recorder now shows a "window hidden" warning when the window is fully covered and no frame has arrived for 10 s (`winlist.covered_fraction`).
+  - The README explains the browser settings. The Firefox setting has **not** been tested yet.
+- **Debug tooling.** `LECTURA_DEBUG=1` writes every page decision to `<session>/debug.log`. `LECTURA_DUMP_FRAMES=<dir>` saves the sampled frames, and `tools/replay.py <dir>` replays them offline.
+- **Packaging.**
+  - `Lectura.spec`, `build.bat` and `run_lectura.py` added.
+  - `dist\Lectura.exe` (107 MB, one file) starts in about 4–8 s, shows the UI, registers Ctrl+Alt+S, and closes cleanly.
+  - The window picker has a hint text and a chevron arrow.
+- **README.md** written.
+- **Tests: 41 of 41 pass.** These include loose crops, dimming, thin-pen whiteboards, and narrow letterboxed tiles.
+- **E2E fake class: 7 of 7 captures (PASS).** Replaying its 228 saved frames also gives 7 of 7 at sensitivity 0.2, 0.5 and 0.8, with dimming, and at 1 sample per second.
+
+### Still open (next session)
+1. **One earlier E2E run missed the after-scroll whiteboard page (6 of 7).** The replays never reproduced it. Keep `LECTURA_DEBUG` on in the next real test and read `debug.log` if a page is missing.
+2. **Walk through the full UI by hand:** crop drag, Pause/Resume, Capture now, Stop, review grid (delete, reorder, enlarge), save dialog, all three formats. Also test crash recovery (kill mid-recording, relaunch).
+3. **Look at the exported PDF, DOCX and PPTX** to check the 2-per-page layout and captions.
+4. **Check the Firefox `about:config` occlusion setting**, the way the Edge flags were checked.
+5. **Test on a real class,** only when you say so.

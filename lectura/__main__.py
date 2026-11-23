@@ -13,7 +13,7 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication
 
     from .settings import Settings
-    from .ui import app_icon
+    from .ui import app_icon, resource_path
     from .ui.main_window import MainWindow
     from .ui.style import QSS
 
@@ -26,7 +26,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName(APP_NAME)
     app.setStyle("Fusion")
-    app.setStyleSheet(QSS)
+    app.setStyleSheet(QSS.replace("__CHEVRON__", resource_path("assets/chevron.png").as_posix()))
     app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(True)
 
