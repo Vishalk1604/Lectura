@@ -157,7 +157,7 @@ def detect_content_rect(frame: np.ndarray) -> Rect:
                 ix, iy, iw, ih = inner
                 yield (x + ix, y + iy, iw, ih), True
 
-    best, best_score = None, 0.0
+    scored: list[tuple[float, Rect]] = []
     seen = set()
     for r, from_letterbox in expanded():
         x, y, rw, rh = r
@@ -179,22 +179,72 @@ def detect_content_rect(frame: np.ndarray) -> Rect:
         touches = sum((x <= 3, y <= 3, x + rw >= w - 3, y + rh >= h - 3))
         if touches >= 3:
             score *= 0.12
-        if score > best_score:
-            best, best_score = r, score
+        scored.append((score, r))
 
-    if best is None:
+    if not scored:
         return (0, 0, w0, h0)
+    best_score, best = max(scored)
+    # A slide with a coloured footer/header band yields two near-identical candidates:
+    # the whole slide and the plain area inside it. Prefer the enclosing one.
+    bx, by, bw, bh = best
+    for score, r in sorted(scored, key=lambda s: -s[1][2] * s[1][3]):
+        x, y, rw, rh = r
+        if (r != best and x <= bx + 2 and y <= by + 2 and x + rw >= bx + bw - 2
+                and y + rh >= by + bh - 2 and rw * rh <= 1.2 * bw * bh
+                and score >= 0.85 * best_score and _near_standard(rw / rh, 0.04)):
+            best = r
+            break
     x, y, rw, rh = best
     # back to full resolution
     x, y = int(round(x / scale)), int(round(y / scale))
     rw, rh = int(round(rw / scale)), int(round(rh / scale))
     x, y = max(0, x), max(0, y)
     rw, rh = min(rw, w0 - x), min(rh, h0 - y)
+    x, y, rw, rh = _snap_edges(frame, (x, y, rw, rh), reach=int(round(2 / scale)) + 3)
     inner = find_letterbox(frame[y:y + rh, x:x + rw])
     if inner is not None:
         ix, iy, iw, ih = inner
         x, y, rw, rh = x + ix, y + iy, iw, ih
     return (x, y, rw, rh)
+
+
+def _snap_edges(frame: np.ndarray, r: Rect, reach: int) -> Rect:
+    """Move each edge (within `reach` px) onto the strongest straight boundary at full
+    resolution; the candidate search runs on a smaller copy and is a few px off."""
+    g = frame if frame.ndim == 2 else cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+    g = g.astype(np.float32)
+    H, W = g.shape
+    x, y, w, h = r
+    x1, y1 = x + w, y + h  # exclusive
+
+    def best_col(c: int, top: int, bottom: int) -> int:
+        lo, hi = max(1, c - reach), min(W - 1, c + reach)
+        if hi <= lo or bottom - top < 10:
+            return c
+        band = g[top:bottom]
+        strength = np.abs(band[:, lo:hi + 1] - band[:, lo - 1:hi]).mean(axis=0)
+        k = int(np.argmax(strength))
+        here = strength[min(max(c - lo, 0), len(strength) - 1)]
+        return lo + k if strength[k] > 1.5 * here + 2 else c
+
+    def best_row(rw_: int, left: int, right: int) -> int:
+        lo, hi = max(1, rw_ - reach), min(H - 1, rw_ + reach)
+        if hi <= lo or right - left < 10:
+            return rw_
+        band = g[:, left:right]
+        strength = np.abs(band[lo:hi + 1] - band[lo - 1:hi]).mean(axis=1)
+        k = int(np.argmax(strength))
+        here = strength[min(max(rw_ - lo, 0), len(strength) - 1)]
+        return lo + k if strength[k] > 1.5 * here + 2 else rw_
+
+    # use the middle 80% of each edge so neighbouring corners don't interfere
+    my0, my1 = y + h // 10, y1 - h // 10
+    mx0, mx1 = x + w // 10, x1 - w // 10
+    nx, nx1 = best_col(x, my0, my1), best_col(x1, my0, my1)
+    ny, ny1 = best_row(y, mx0, mx1), best_row(y1, mx0, mx1)
+    if nx1 - nx < 0.8 * w or ny1 - ny < 0.8 * h:
+        return r
+    return (nx, ny, nx1 - nx, ny1 - ny)
 
 
 # ------------------------------------------------------------------ relative rects

@@ -46,7 +46,7 @@ def export_pdf(pages: list[Page], out: Path, title: str = "", page_size: str = "
             c.setFont("Helvetica-Oblique", 8.5)
             c.setFillColor(Color(0.38, 0.38, 0.38))
             text = f"{i + 1}  ·  {page.caption}" if page.caption else f"{i + 1}"
-            c.drawCentredString(pw * cm / 2, (y - 0.5) * cm, text.replace("·", "-"))
+            c.drawCentredString(pw * cm / 2, (y - 0.5) * cm, text)  # "·" is in WinAnsi
         if progress:
             progress(i + 1, len(pages))
     c.save()

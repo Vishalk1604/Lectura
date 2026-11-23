@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from lectura.autocrop import (detect_content_rect, find_letterbox, from_fraction,
                               to_fraction, trim_uniform_border)
@@ -58,6 +59,30 @@ def test_small_presentation_tile_beats_whole_page():
         frame[top:top + 180, 590:910] = tile
     got = detect_content_rect(frame)
     assert close(got, (21, 363, 545, 306), tol=8), got
+
+
+@pytest.mark.parametrize("dim", [1.0, 0.55])
+def test_slide_with_coloured_footer_keeps_the_footer(dim):
+    """A slide whose bottom band is a different colour (theme footer) must not be cut off."""
+    import cv2
+    s = synth.slide(1, 3)
+    s[-26:] = (229, 70, 79)  # purple footer bar
+    frame, expected = synth.meet_layout(s)
+    frame = (frame.astype(np.float32) * dim).astype(np.uint8)
+    got = detect_content_rect(frame)
+    assert close(got, expected), (got, expected)
+
+
+@pytest.mark.parametrize("dim", [1.0, 0.55, 0.4])
+def test_real_simulator_window_is_cropped_exactly(dim):
+    """Captured Edge window of tools/class_sim.html: slide with a purple footer bar,
+    letterboxed in a dark Meet-like page with participant tiles beside it."""
+    from pathlib import Path
+
+    import cv2
+    f = cv2.imread(str(Path(__file__).parent / "fixtures" / "sim_window_slide1.png"))
+    f = (f.astype(np.float32) * dim).astype(np.uint8)
+    assert close(detect_content_rect(f), (17, 137, 1208, 681), tol=2)
 
 
 def test_no_rectangle_returns_full_frame():

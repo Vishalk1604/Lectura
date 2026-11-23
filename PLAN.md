@@ -154,9 +154,31 @@ The app is named **Lectura** (package `lectura/`, repo github.com/Vishalk1604/Le
 - **Tests: 41 of 41 pass.** These include loose crops, dimming, thin-pen whiteboards, and narrow letterboxed tiles.
 - **E2E fake class: 7 of 7 captures (PASS).** Replaying its 228 saved frames also gives 7 of 7 at sensitivity 0.2, 0.5 and 0.8, with dimming, and at 1 sample per second.
 
+## Progress (session 3, 2026-11-23): UI walkthrough
+
+### Done
+- **`tools/ui_smoke.py`** drives the real Lectura window against the fake class. Settings, sessions and saved files all go to the out folder. It has three phases: `main`, `crash` and `recover`. These all **pass**:
+  - picking the window, auto-detect, dragging a crop corner;
+  - Start, Pause/Resume, the global Ctrl+Alt+S hotkey, Stop;
+  - in review: Delete key, reorder plus renumbering, double-click viewer with arrow keys;
+  - the save dialog saving all three formats, with your choices remembered;
+  - the session marked as saved, with the review order kept.
+- **Crash recovery passes.** Killing the app mid-class with 2 captures and a page in progress gave a relaunch prompt for "3 unsaved captures", then review, then save as PDF.
+- **Exports checked visually** (PDF via pypdfium2; DOCX and PPTX rendered through Word and PowerPoint):
+  - PDF and Word: A4, two per page, header and captions.
+  - PowerPoint: one per slide with a caption strip below.
+  - PDF captions now use "·" like the other formats.
+- **Auto-crop fixed:**
+  - When one candidate encloses another of nearly the same size, the outer one wins, so a slide's coloured footer is no longer cut off.
+  - Edges snap to the sharpest boundary at full resolution.
+  - On a real captured simulator frame the result is pixel-exact (test fixture `tests/fixtures/sim_window_slide1.png`).
+- **Tests: 46 of 46 pass.**
+
 ### Still open (next session)
-1. **One earlier E2E run missed the after-scroll whiteboard page (6 of 7).** The replays never reproduced it. Keep `LECTURA_DEBUG` on in the next real test and read `debug.log` if a page is missing.
-2. **Walk through the full UI by hand:** crop drag, Pause/Resume, Capture now, Stop, review grid (delete, reorder, enlarge), save dialog, all three formats. Also test crash recovery (kill mid-recording, relaunch).
-3. **Look at the exported PDF, DOCX and PPTX** to check the 2-per-page layout and captions.
-4. **Check the Firefox `about:config` occlusion setting**, the way the Edge flags were checked.
-5. **Test on a real class,** only when you say so.
+1. **The throwaway Edge test profile sometimes dims the whole window and renders sluggishly** (first-run UI?). In that state one walkthrough run missed slide 1 and saved a half-faded frame. Clean recordings and replays (with dimming) are fine.
+   - Make the tests stable: try `--app=<url>` or a reused profile.
+   - For real classes, consider a longer settle time or a check for blended ("ghost") frames.
+   - `ui_smoke.py` now saves frames, so any repeat can be replayed with `tools/replay.py`.
+2. **Real mouse-drag reorder in the review grid is untested.** Reorder was tested through the list API.
+3. **The Firefox `about:config` occlusion setting is untested.** The Edge/Chrome flags are verified.
+4. **Test on a real class,** only when you say so, with `LECTURA_DEBUG=1`.

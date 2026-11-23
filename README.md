@@ -80,6 +80,11 @@ Tests:
 a whiteboard with a small erase, a new page and a scroll.
 `tools/e2e_sim.py <folder>` records it in a separate Edge window and exports all three formats.
 It should produce 7 captures.
+`tools/ui_smoke.py <folder> main|crash|recover` drives the real Lectura window through every
+screen and the crash-recovery path, saving screenshots of each step.
+`tools/replay.py <frames-folder>` replays saved frames through the detector offline.
+Frames are saved when `LECTURA_DUMP_FRAMES` is set.
+Setting `LECTURA_DEBUG=1` writes every page decision to `debug.log` in the session folder.
 
 ## How it works
 
